@@ -1,6 +1,6 @@
 'use client';
 
-import { useState } from 'react';
+import { useState, useRef } from 'react';
 
 interface Message {
   id: string;
@@ -13,19 +13,25 @@ export default function ChatPage() {
   const [userData, setUserData] = useState({
     nome: '',
     telefone: '',
-    descricao: ''
+    descricao: '',
+    imagemUrl: ''
   });
 
   const [messages, setMessages] = useState<Message[]>([
-    { id: '1', sender: 'bot', text: 'Olá! Sou o assistente de Zeladoria Urbana. Para comecar, digite seu nome completo:' }
+    { id: '1', sender: 'bot', text: 'Olá! Sou o assistente de Zeladoria Urbana. Para começar, digite seu nome completo:' }
   ]);
   const [input, setInput] = useState('');
   const [loading, setLoading] = useState(false);
+  const fileInputRef = useRef<HTMLInputElement>(null);
 
-  const handleSend = async () => {
-    if (!input.trim() || loading) return;
+  const handleSend = async (fileToUpload?: File) => {
+    if (!input.trim() && !fileToUpload || loading) return;
 
-    const userText = input;
+    let userText = input;
+    if (fileToUpload) {
+      userText = `Anexo enviado: ${fileToUpload.name}`;
+    }
+
     setInput('');
     setLoading(true);
 
@@ -37,95 +43,141 @@ export default function ChatPage() {
 
     setMessages((prev) => [...prev, userMessage]);
 
-    let updatedData = { ...userData };
+    let currentNome = userData.nome;
+    let currentTelefone = userData.telefone;
+    let currentDescricao = userData.descricao;
+    let currentImagemUrl = userData.imagemUrl;
 
-    if (step === 1) updatedData.nome = userText;
-    if (step === 2) updatedData.telefone = userText;
-    if (step === 3) updatedData.descricao = userText;
+    if (step === 1) currentNome = userText;
+    if (step === 2) currentTelefone = userText;
+    if (step === 3) currentDescricao = userText;
 
-    setUserData(updatedData);
+    if (fileToUpload && step === 4) {
+      try {
+        const formData = new FormData();
+        formData.append('file', fileToUpload);
+
+        const uploadRes = await fetch('/api/upload', {
+          method: 'POST',
+          body: formData,
+        });
+        
+        const uploadData = await uploadRes.json();
+        if (uploadData.url) {
+          currentImagemUrl = uploadData.url;
+        }
+      } catch (err) {
+        console.error("Erro ao subir imagem:", err);
+      }
+    }
+
+    setUserData({
+      nome: currentNome,
+      telefone: currentTelefone,
+      descricao: currentDescricao,
+      imagemUrl: currentImagemUrl
+    });
 
     try {
       const response = await fetch('/api/chat', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
-          ...updatedData,
-          step: step
+          nome: currentNome,
+          telefone: currentTelefone,
+          descricao: currentDescricao,
+          imagemUrl: currentImagemUrl,
+          step: fileToUpload ? 4 : step
         })
       });
 
       const data = await response.json();
 
-      setMessages((prev) => [...prev, {
-        id: Date.now().toString(),
-        sender: 'bot',
-        text: data.message
-      }]);
-
-      setStep((prev) => prev + 1);
-
-    } catch (err) {
-      setMessages((prev) => [...prev, {
-        id: Date.now().toString(),
-        sender: 'bot',
-        text: 'Ops, tive um problema ao processar. Tente novamente.'
-      }]);
+      if (data.message) {
+        setMessages((prev) => [
+          ...prev,
+          { id: (Date.now() + 1).toString(), sender: 'bot', text: data.message }
+        ]);
+        setStep((prev) => prev + 1);
+      }
+    } catch (error) {
+      console.error(error);
     } finally {
       setLoading(false);
     }
   };
 
+  const handleFileChange = (e: React.ChangeEvent<HTMLInputElement>) => {
+    if (e.target.files && e.target.files[0]) {
+      handleSend(e.target.files[0]);
+    }
+  };
+
   return (
-    <div className="min-h-screen bg-slate-50 flex flex-col h-screen font-sans">
-      <header className="bg-white border-b border-slate-200 text-slate-800 p-4 shadow-sm flex justify-between items-center">
-        <h1 className="text-lg font-bold text-blue-900">💬 Assistente de Zeladoria</h1>
+    <div className="flex flex-col h-screen bg-slate-50">
+      <header className="bg-white border-b border-slate-200 px-6 py-4 shadow-sm">
+        <h1 className="text-xl font-bold text-blue-900 flex items-center gap-2">
+          <span>💬</span> Assistente de Zeladoria
+        </h1>
       </header>
 
-      <main className="flex-1 overflow-y-auto p-4 space-y-4 max-w-2xl w-full mx-auto">
+      <main className="flex-1 overflow-y-auto p-6 max-w-3xl w-full mx-auto space-y-4">
         {messages.map((msg) => (
-          <div key={msg.id} className={`flex ${msg.sender === 'user' ? 'justify-end' : 'justify-start'}`}>
-            <div className={`max-w-[80%] p-3.5 rounded-2xl text-sm ${
-              msg.sender === 'user' 
-                ? 'bg-blue-600 text-white rounded-br-none' 
-                : 'bg-white text-slate-800 border border-slate-100 shadow-sm rounded-bl-none'
-            }`}>
+          <div
+            key={msg.id}
+            className={`flex ${msg.sender === 'user' ? 'justify-end' : 'justify-start'}`}
+          >
+            <div
+              className={`max-w-[80%] rounded-2xl px-4 py-3 shadow-sm text-sm md:text-base ${
+                msg.sender === 'user'
+                  ? 'bg-blue-600 text-white rounded-tr-none'
+                  : 'bg-white text-slate-800 border border-slate-200 rounded-tl-none'
+              }`}
+            >
               {msg.text}
             </div>
           </div>
         ))}
-        {loading && (
-          <div className="flex justify-start">
-            <div className="bg-white border border-slate-100 p-3 rounded-2xl text-xs text-slate-400 shadow-sm">
-              Digitando...
-            </div>
-          </div>
-        )}
       </main>
 
-      <footer className="bg-white border-t border-slate-200 p-4 max-w-2xl w-full mx-auto rounded-t-xl shadow-md">
-        {step <= 4 ? (
-          <div className="flex gap-2 w-full">
-            <input
-              type="text"
-              value={input}
-              onChange={(e) => setInput(e.target.value)}
-              onKeyDown={(e) => e.key === 'Enter' && handleSend()}
-              placeholder="Digite aqui..."
-              disabled={loading}
-              className="flex-1 border border-slate-200 rounded-xl px-4 py-2.5 text-sm focus:outline-none focus:border-blue-500 disabled:bg-slate-50"
-            />
-            <button 
-              onClick={handleSend} 
-              disabled={loading}
-              className="bg-blue-600 hover:bg-blue-700 disabled:bg-blue-400 text-white px-5 py-2.5 rounded-xl text-sm font-semibold transition"
-            >
-              Enviar
-            </button>
-          </div>
-        ) : (
-          <p className="text-center text-sm text-green-600 font-semibold py-1">✓ Chamado enviado com sucesso!</p>
-        )}
+      <footer className="bg-white border-t border-slate-200 p-4 shadow-lg">
+        <div className="max-w-3xl mx-auto flex gap-2 items-center">
+          <input 
+            type="file" 
+            ref={fileInputRef}
+            onChange={handleFileChange}
+            accept="image/*"
+            className="hidden"
+          />
+          
+          <button
+            onClick={() => fileInputRef.current?.click()}
+            disabled={loading}
+            type="button"
+            className="bg-slate-200 hover:bg-slate-300 text-slate-700 p-3 rounded-xl transition text-xl flex items-center justify-center"
+            title="Enviar imagem"
+          >
+            📷
+          </button>
+
+          <input
+            type="text"
+            value={input}
+            onChange={(e) => setInput(e.target.value)}
+            onKeyDown={(e) => e.key === 'Enter' && handleSend()}
+            placeholder={step === 4 ? "Clique na câmera para enviar a foto..." : "Digite sua mensagem aqui..."}
+            className="flex-1 border border-slate-300 rounded-xl px-4 py-3 text-sm focus:outline-none focus:border-blue-500 text-slate-900"
+            disabled={loading || step === 4}
+          />
+          
+          <button
+            onClick={() => handleSend()}
+            disabled={loading || step === 4}
+            className="bg-blue-600 hover:bg-blue-700 disabled:bg-blue-400 text-white font-medium px-6 py-3 rounded-xl transition shadow-sm text-sm"
+          >
+            {loading ? '...' : 'Enviar'}
+          </button>
+        </div>
       </footer>
     </div>
   );
